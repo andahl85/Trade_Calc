@@ -149,6 +149,9 @@ details[open]>summary::before{content:"−"}
 .plan{border:1px dashed var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
 .plan-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
 .plan-text{margin:0;font:400 .84rem/1.55 var(--num);overflow-wrap:anywhere}
+.logbtn{width:100%;min-height:48px;margin-top:10px;font-size:1rem}
+.logbtn:disabled{opacity:.45}
+.loghint{margin:6px 0 0;font-size:.78rem;line-height:1.45;color:var(--muted)}
 .btn{min-height:40px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-weight:600;font-size:.9rem}
 .btn.primary{background:var(--ink);border-color:var(--ink);color:var(--bg)}
 .btn:disabled{opacity:.45}
@@ -292,6 +295,8 @@ dialog form{display:flex;flex-direction:column;max-height:calc(100vh - 48px)}
   <section class="plan">
     <div class="plan-head"><span class="mini">Planrad till Notion</span><button type="button" class="btn" id="btn-plan">Kopiera</button></div>
     <p class="plan-text" id="plan-text">Planraden visas här när nivåerna och certets kurs är ifyllda.</p>
+    <button type="button" class="btn primary logbtn" id="btn-log" disabled>Ta traden – logga i Notion</button>
+    <p class="loghint" id="log-hint">Knappen aktiveras när nivåerna och certets kurs är ifyllda.</p>
   </section>
 
   <p class="foot">Kurserna avrundas till närmaste tick och antalet nedåt, så att risken aldrig går över vald risk. Stäm av mot orderformuläret i Avanza innan du skickar ordern. <button type="button" class="link" id="btn-ex">Visa ett exempel</button></p>
@@ -656,8 +661,55 @@ function calc(inp){
     $('plan-text').textContent = full ? plan : 'Planraden visas här när nivåerna och certets kurs är ifyllda.';
     $('btn-plan').disabled = !full;
 
-    last = { o:o, full:full, plan:plan };
+    last = { o:o, full:full, plan:plan, L:L, dir:dir, inp:inp };
+    renderLog();
   }
+
+  // Logga i Notion via iOS-genvägen "Logga trade"
+  var LOG_DB = '702cf2a039cf83d592618144eb3fb64d';
+  var loggedPlan = null;
+  function r2(v){ return Math.round(v * 100) / 100; }
+  function r4(v){ return Math.round(v * 10000) / 10000; }
+  function logBody(){
+    var o = last.o, u = I(), inp = last.inp, dir = last.dir;
+    var bb = (dir > 0 ? 'BULL' : 'BEAR') + ' X' + Math.round(last.L);
+    var rikt = dir > 0 ? 'Lång' : 'Kort';
+    var pr = {
+      'Namn': { title: [{ text: { content: u.btn + ' ' + rikt + ' (' + bb + ')' } }] },
+      'Datum öppnad': { date: { start: new Date().toISOString() } },
+      'Instrument': { select: { name: (dir > 0 ? 'BULL ' : 'BEAR ') + u.btn + ' X' + Math.round(last.L) } },
+      'Riktning': { select: { name: rikt } },
+      'Tradestatus': { select: { name: 'Öppen' } },
+      'SL': { select: { name: 'Ej kvitterad' } },
+      'Källa': { select: { name: 'Kalkylator' } },
+      'Entry (underl.)': { number: r4(inp.E) },
+      'SL (underl.)': { number: r4(inp.S) },
+      'Cert entry': { number: r4(o.Ce) },
+      'Cert SL': { number: r4(o.Cs) },
+      'Antal': { number: o.n },
+      'Insats (kr)': { number: r2(o.insats) },
+      'Planerad risk (kr)': { number: r2(o.riskKr) }
+    };
+    if (isFinite(inp.T)) pr['TP (underl.)'] = { number: r4(inp.T) };
+    if (isFinite(o.Ct)) pr['Cert TP'] = { number: r4(o.Ct) };
+    if (isFinite(o.R)) pr['Planerad R'] = { number: r2(o.R) };
+    return { parent: { database_id: LOG_DB }, properties: pr };
+  }
+  function renderLog(){
+    var b = $('btn-log'), h = $('log-hint');
+    var full = last && last.full, done = full && loggedPlan === last.plan;
+    b.disabled = !full || done;
+    b.textContent = done ? 'Loggad ✓' : 'Ta traden – logga i Notion';
+    if (done) h.textContent = 'Skickad. Lägg SL och TP i Avanza – påminnelsen kommer om ca 90 sekunder.';
+    else h.textContent = full ? 'Sparar planen i Tradingdagboken och startar SL-påminnelsen. Tryck innan du köper.' : 'Knappen aktiveras när nivåerna och certets kurs är ifyllda.';
+  }
+  $('btn-log').addEventListener('click', function(){
+    if (!last || !last.full) return;
+    var url = 'shortcuts://run-shortcut?name=' + encodeURIComponent('Logga trade') + '&input=text&text=' + encodeURIComponent(JSON.stringify(logBody()));
+    loggedPlan = last.plan;
+    renderLog();
+    window.location.href = url;
+  });
 
   syncInputs();
   render();
